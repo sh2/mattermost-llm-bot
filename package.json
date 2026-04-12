@@ -1,0 +1,23 @@
+{
+  "name": "mattermost-llm-bot",
+  "version": "0.1.0",
+  "description": "Mattermost chat bot using OpenAI REST API",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@mattermost/client": "^11.5.0",
+    "dotenv": "^17.4.0",
+    "ws": "^8.20.0"
+  }
+}
