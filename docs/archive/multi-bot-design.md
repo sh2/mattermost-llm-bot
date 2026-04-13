@@ -99,13 +99,6 @@ bot 単位の必須機微情報:
 - token 用環境変数: `BOT_SUPPORT_JA_TOKEN`
 - API key 用環境変数: `BOT_SUPPORT_JA_LLM_API_KEY`
 
-移行用に、先頭 bot のみ次の旧環境変数を暫定的に許容してもよい。
-
-- `BOT_TOKEN`
-- `OPENAI_API_KEY`
-
-ただし、これは移行支援であり、主インターフェースとして残さない。
-
 ### JSON ファイル形式
 
 ```json
@@ -161,7 +154,13 @@ bot 単位の必須機微情報:
   - 任意
   - 既定値: `openai`
   - 初回実装では `openai` のみ許容する
+  - native client の切り替えに使う値として保持する
   - 将来 `gemini`、`anthropic` などを追加できる値として予約する
+- `llm.compatibilityProfile`
+  - 任意
+  - 既定値: `openai`
+  - `llm.provider=openai` のときの OpenAI互換 API 差分を表す
+  - 例: `openai`、`gemini-openai`
 - `llm.model`
   - defaults マージ後に必須
   - 非機微情報
@@ -201,6 +200,7 @@ bot 単位の必須機微情報:
       },
       llm: {
         provider: "openai",
+        compatibilityProfile: "openai",
         apiKey: "...secret...",
         model: "gpt-5.1-mini",
         stream: true,
@@ -214,7 +214,9 @@ bot 単位の必須機微情報:
 }
 ```
 
-`llm.provider` は初回実装では `openai` 固定だが、設定データ上は将来の `gemini`、`anthropic` 追加を見越して保持する。
+`llm.provider` は初回実装では `openai` 固定だが、設定データ上は将来の native Gemini API や Anthropic API 追加を見越して保持する。
+
+`llm.compatibilityProfile` は OpenAI互換 API 上の差分を表す。たとえば Gemini の OpenAI互換 API を叩く場合は `llm.provider=openai` のまま `llm.compatibilityProfile=gemini-openai` とし、将来の native Gemini API 対応とは区別する。
 
 `llm.apiUrl` は実行時に provider ごとの規則で組み立てた最終リクエスト先 URL を表す。初回実装では OpenAI 用の `/chat/completions` URL のみを扱う。
 
@@ -291,7 +293,7 @@ shutdown は best-effort とする。
 
 - `senderName` が `ai-` で始まる場合は無視する
 
-これにより現在の挙動を維持しつつ、不要な設定項目の追加を避ける。
+これにより現在の挙動を維持しつつ、不必要な設定項目の追加を避ける。
 
 ### 重複処理防止
 
@@ -372,7 +374,7 @@ shutdown は best-effort とする。
 - Mattermost の詳細を知ること
 - bot 名や routing policy を知ること
 
-将来的に Gemini API や Anthropic API に対応する場合は、同等の責務を持つ provider 別 client を追加し、呼び出し側は `llm.provider` に応じて切り替える。
+将来的に Gemini API や Anthropic API に対応する場合は、同等の責務を持つ provider 別 client を追加し、呼び出し側は `llm.provider` に応じて切り替える。Gemini の OpenAI互換 API はこの文脈では `openai` client の互換 profile として扱う。
 
 ## バリデーション方針
 
@@ -396,89 +398,3 @@ shutdown は best-effort とする。
 ## ロギング設計
 
 bot 固有のログには bot 名を含める。
-
-望ましい形式:
-
-- `[support-ja] Mattermost bot is ready as @support-ja`
-- `[review-en] Failed to process Mattermost post`
-
-実装方法は次のいずれかを想定する。
-
-- prefix 付き logger を注入する
-- オーケストレーション層でログ文言に prefix を付ける
-
-## 互換性と移行
-
-### 既存の単一 bot 構成からの移行
-
-移行手順:
-
-1. `config/bots.json` を作成する
-2. `.env` の非機微項目を JSON に移す
-3. 機微情報は `.env` に残す
-4. bot 単位の環境変数名を追加する
-5. まずは bot を 1 件だけ定義して起動する
-6. その後 bot 定義を段階的に追加する
-
-### 移行期間の互換性
-
-先頭 bot に限り、次の旧環境変数を任意で許容してもよい。
-
-- `BOT_TOKEN`
-- `OPENAI_API_KEY`
-
-これにより移行コストは下がるが、新規構成では bot 単位の環境変数のみを使う。
-
-## テスト計画
-
-### 設定テスト
-
-追加するテスト:
-
-- JSON ファイルの解析
-- defaults のマージ
-- bot 単位 secret の環境変数解決
-- bot 名重複検知
-- bot ごとのバリデーションメッセージ
-- bot ごとの base URL 正規化
-- `llm.provider` が `openai` 以外のときに未対応エラーになること
-
-### Bot テスト
-
-追加するテスト:
-
-- `ai-` 固定の送信者抑止
-- 他 bot が存在しても現在の bot への mention のみ判定すること
-- 現在の bot username だけを除去するサニタイズ
-
-### オーケストレーションテスト
-
-追加するテスト:
-
-- 全 bot が正常起動すること
-- signal で全 bot が停止すること
-- 後続 bot の起動失敗時に先行 bot をロールバックすること
-
-## 未決事項
-
-1. fail-fast を恒久仕様にするか、将来 partial startup を設定可能にするか。
-2. bot ごとのログ出力を logger wrapper で実装するか、inline prefix にするか。
-3. `typingIntervalMs` と `streamUpdateIntervalMs` を固定値のままにするか、将来的に JSON 設定化するか。
-
-## 初回実装の範囲
-
-初回実装で含めるもの:
-
-- JSON + 環境変数の統合設定ロード
-- 複数 bot のプロセスオーケストレーション
-- `ai-` 固定の送信者抑止
-- fail-fast 起動と協調 shutdown
-- OpenAI 用の `llm.provider=openai` 対応
-- 設定とオーケストレーションのテスト
-
-初回実装で含めないもの:
-
-- hot reload
-- admin API
-- 実行中の bot enable/disable
-- WebSocket 共有最適化

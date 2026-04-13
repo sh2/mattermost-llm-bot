@@ -83,14 +83,6 @@ export class MattermostService {
     };
   }
 
-  getCurrentUser() {
-    if (!this.currentUser) {
-      throw new Error('Mattermost client is not connected.');
-    }
-
-    return this.currentUser;
-  }
-
   async getThread(postId) {
     this.ensureClient();
     return this.client.getPostThread(postId);

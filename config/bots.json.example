@@ -1,0 +1,23 @@
+{
+  "defaults": {
+    "mattermost": {
+      "url": "http://127.0.0.1:8065"
+    },
+    "llm": {
+      "provider": "openai",
+      "compatibilityProfile": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "stream": true,
+      "reasoningEffort": "medium",
+      "verbosity": "medium"
+    }
+  },
+  "bots": [
+    {
+      "name": "support-ja",
+      "llm": {
+        "model": "gpt-5.4-mini"
+      }
+    }
+  ]
+}

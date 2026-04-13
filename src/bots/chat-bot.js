@@ -4,6 +4,14 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizeSenderName(senderName) {
+  if (typeof senderName !== 'string') {
+    return '';
+  }
+
+  return senderName.trim().replace(/^@+/, '');
+}
+
 function buildMentionPattern(botUsername) {
   return new RegExp(`(^|\\s)@${escapeRegExp(botUsername)}(?=$|\\s)`);
 }
@@ -18,17 +26,49 @@ function stripStreamingCursor(message) {
   return message.endsWith(STREAM_CURSOR) ? message.slice(0, -1) : message;
 }
 
+function getThreadPostsInConversationOrder(thread) {
+  const posts = Object.values(thread?.posts ?? {}).filter(Boolean);
+  const orderIndex = new Map((thread?.order ?? []).map((postId, index) => [postId, index]));
+
+  return posts.sort((left, right) => {
+    const leftCreateAt = typeof left.create_at === 'number' ? left.create_at : null;
+    const rightCreateAt = typeof right.create_at === 'number' ? right.create_at : null;
+
+    if (leftCreateAt !== null && rightCreateAt !== null && leftCreateAt !== rightCreateAt) {
+      return leftCreateAt - rightCreateAt;
+    }
+
+    if (!left.root_id && right.root_id) {
+      return -1;
+    }
+
+    if (left.root_id && !right.root_id) {
+      return 1;
+    }
+
+    const leftIndex = orderIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightIndex = orderIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+
+    if (leftIndex !== rightIndex) {
+      return leftIndex - rightIndex;
+    }
+
+    return String(left.id ?? '').localeCompare(String(right.id ?? ''));
+  });
+}
+
 function formatErrorForMattermost(error) {
   const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
   const cappedDetails = details.slice(0, 12000);
   return `Exception occurred.\n\`\`\`\n${cappedDetails}\n\`\`\``;
 }
 
-async function streamReply({ openai, messages, replyId, updateIntervalMs, updatePost }) {
+async function streamReply({ llm, messages, replyId, updateIntervalMs, updatePost }) {
   let latestReply = '';
   let lastUpdateAt = 0;
+  let latestReplyId = replyId ?? null;
 
-  const finalReply = await openai.createChatCompletion(messages, {
+  const finalReply = await llm.createChatCompletion(messages, {
     stream: true,
     onDelta: async (fullReply) => {
       latestReply = fullReply;
@@ -39,23 +79,21 @@ async function streamReply({ openai, messages, replyId, updateIntervalMs, update
       }
 
       lastUpdateAt = now;
-      await updatePost(replyId, `${fullReply}${STREAM_CURSOR}`);
+      latestReplyId = await updatePost(latestReplyId, `${fullReply}${STREAM_CURSOR}`);
     },
   });
 
-  return latestReply || finalReply;
+  return {
+    replyId: latestReplyId,
+    replyMessage: finalReply || latestReply,
+  };
 }
 
-export function shouldRespondToThread(thread, senderName, botUsername) {
-  if (senderName.startsWith('ai-')) {
-    return false;
-  }
-
+export function shouldRespondToThread(thread, botUsername) {
   const mentionPattern = buildMentionPattern(botUsername);
-  return thread.order.some((postId) => {
-    const post = thread.posts[postId];
-    return post ? mentionPattern.test(post.message ?? '') : false;
-  });
+  return getThreadPostsInConversationOrder(thread).some((post) =>
+    mentionPattern.test(post.message ?? ''),
+  );
 }
 
 export function buildOpenAIRequestMessages({
@@ -69,12 +107,7 @@ export function buildOpenAIRequestMessages({
     content: systemPrompt,
   }];
 
-  for (const postId of thread.order) {
-    const post = thread.posts[postId];
-
-    if (!post) {
-      continue;
-    }
+  for (const post of getThreadPostsInConversationOrder(thread)) {
 
     if (post.user_id === botUserId) {
       messages.push({
@@ -94,9 +127,9 @@ export function buildOpenAIRequestMessages({
 }
 
 export class ChatBot {
-  constructor({ mattermost, openai, config, logger = console }) {
+  constructor({ mattermost, llm, config, logger = console }) {
     this.mattermost = mattermost;
-    this.openai = openai;
+    this.llm = llm;
     this.config = config;
     this.logger = logger;
     this.processingPostIds = new Set();
@@ -124,12 +157,18 @@ export class ChatBot {
 
   async processPost(event) {
     const { post, senderName } = event;
+    const normalizedSenderName = normalizeSenderName(senderName);
 
     if (!this.botUser) {
       throw new Error('Bot user is not initialized.');
     }
 
-    if (!post || post.user_id === this.botUser.id || post.type) {
+    if (
+      !post
+      || post.user_id === this.botUser.id
+      || normalizedSenderName.startsWith('ai-')
+      || post.type
+    ) {
       return;
     }
 
@@ -140,9 +179,11 @@ export class ChatBot {
     this.processingPostIds.add(post.id);
 
     try {
-      const thread = await this.mattermost.getThread(post.id);
+      const rootId = post.root_id || post.id;
+      const thread = await this.mattermost.getThread(rootId);
+      const llmConfig = this.config.llm;
 
-      if (!shouldRespondToThread(thread, senderName, this.botUser.username)) {
+      if (!shouldRespondToThread(thread, this.botUser.username)) {
         return;
       }
 
@@ -153,29 +194,44 @@ export class ChatBot {
         botUsername: this.botUser.username,
         systemPrompt: channel.header ?? '',
       });
-      const rootId = post.root_id || post.id;
       const typing = this.mattermost.startTypingLoop(post.channel_id, post.root_id || '');
 
       try {
-        if (this.config.openai.stream) {
-          const replyPost = await this.mattermost.createReply({
-            channelId: post.channel_id,
-            rootId,
-            message: '',
-          });
-          const replyMessage = await streamReply({
-            openai: this.openai,
+        if (llmConfig.stream) {
+          const { replyId, replyMessage } = await streamReply({
+            llm: this.llm,
             messages,
-            replyId: replyPost.id,
-            updateIntervalMs: this.config.openai.streamUpdateIntervalMs,
-            updatePost: (postId, message) => this.mattermost.updatePostMessage(postId, message),
+            updateIntervalMs: llmConfig.streamUpdateIntervalMs,
+            updatePost: async (postId, message) => {
+              if (!postId) {
+                const replyPost = await this.mattermost.createReply({
+                  channelId: post.channel_id,
+                  rootId,
+                  message,
+                });
+
+                return replyPost.id;
+              }
+
+              await this.mattermost.updatePostMessage(postId, message);
+              return postId;
+            },
           });
 
-          await this.mattermost.updatePostMessage(replyPost.id, replyMessage);
+          if (replyId) {
+            await this.mattermost.updatePostMessage(replyId, replyMessage);
+          } else {
+            await this.mattermost.createReply({
+              channelId: post.channel_id,
+              rootId,
+              message: replyMessage,
+            });
+          }
+
           return;
         }
 
-        const replyMessage = await this.openai.createChatCompletion(messages, {
+        const replyMessage = await this.llm.createChatCompletion(messages, {
           stream: false,
         });
 
