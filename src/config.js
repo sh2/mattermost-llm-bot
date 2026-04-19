@@ -214,11 +214,6 @@ function buildRuntimeBotConfig(mergedBot, env) {
     );
   }
 
-  const compatibilityProfile = normalizeOptionalString(
-    mergedBot.llm.compatibilityProfile,
-    `${botLabel} llm.compatibilityProfile`,
-    'openai',
-  );
   const apiUrl = normalizeOpenAIBaseUrl(
     normalizeOptionalString(mergedBot.llm.baseUrl, `${botLabel} llm.baseUrl`, DEFAULT_OPENAI_BASE_URL),
     `${botLabel} llm.baseUrl`,
@@ -234,7 +229,6 @@ function buildRuntimeBotConfig(mergedBot, env) {
     },
     llm: {
       provider,
-      compatibilityProfile,
       apiKey: readBotSecret(env, `BOT_${envSuffix}_LLM_API_KEY`, botLabel),
       model: normalizeRequiredString(mergedBot.llm.model, `${botLabel} llm.model`),
       stream: parseBooleanLike(mergedBot.llm.stream, `${botLabel} llm.stream`, true),
@@ -242,12 +236,12 @@ function buildRuntimeBotConfig(mergedBot, env) {
       reasoningEffort: normalizeOptionalString(
         mergedBot.llm.reasoningEffort,
         `${botLabel} llm.reasoningEffort`,
-        'medium',
+        null,
       ),
       verbosity: normalizeOptionalString(
         mergedBot.llm.verbosity,
         `${botLabel} llm.verbosity`,
-        'medium',
+        null,
       ),
       streamUpdateIntervalMs: 1000,
     },

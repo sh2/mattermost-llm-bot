@@ -13,6 +13,8 @@ A Mattermost chat bot implemented in JavaScript for Node.js. It connects to Matt
 
 ## Setup
 
+Requires Node.js 20 or newer.
+
 ```bash
 npm install
 cp .env.example .env
@@ -35,11 +37,8 @@ The default `config/bots.json` looks like this:
     },
     "llm": {
       "provider": "openai",
-      "compatibilityProfile": "openai",
       "baseUrl": "https://api.openai.com/v1",
-      "stream": true,
-      "reasoningEffort": "medium",
-      "verbosity": "medium"
+      "stream": true
     }
   },
   "bots": [
@@ -48,10 +47,24 @@ The default `config/bots.json` looks like this:
       "llm": {
         "model": "gpt-5.4-mini"
       }
+    },
+    {
+      "name": "review-en",
+      "llm": {
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "verbosity": "medium"
+      }
     }
   ]
 }
 ```
+
+`llm.reasoningEffort` and `llm.verbosity` are optional per-bot settings:
+
+- Omit them entirely when the target endpoint does not support them. In that case, the bot does **not** send the `reasoning_effort` or `verbosity` request parameters at all.
+- Set them under each bot's `llm` block when you want to enable them for a specific bot, like `review-en` in the example above.
+- The JSON config uses `reasoningEffort` / `verbosity`, and those are translated to `reasoning_effort` / `verbosity` in the OpenAI-compatible HTTP request only when values are explicitly configured.
 
 ## Environment Variables
 

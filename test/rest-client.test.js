@@ -138,6 +138,70 @@ test('OpenAIRestClient sends non-streaming requests with auth headers', async ()
   });
 });
 
+test('OpenAIRestClient omits optional GPT-5 fields when they are unset', async () => {
+  let request;
+  const logEntries = [];
+  const fetchImpl = async (url, options) => {
+    request = { url, options };
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: 'non-stream reply',
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
+  };
+
+  const client = new OpenAIRestClient(
+    {
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      reasoningEffort: null,
+      verbosity: null,
+    },
+    fetchImpl,
+    {
+      info(message) {
+        logEntries.push(message);
+      },
+    },
+  );
+
+  const result = await client.createChatCompletion([{ role: 'user', content: 'hello' }]);
+
+  assert.equal(result, 'non-stream reply');
+  assert.deepEqual(JSON.parse(request.options.body), {
+    model: 'gpt-test',
+    messages: [{ role: 'user', content: 'hello' }],
+    stream: false,
+  });
+
+  const requestSummary = parseLogSummary(logEntries[0], 'OpenAI request summary');
+  assert.deepEqual(requestSummary, {
+    model: 'gpt-test',
+    stream: false,
+    stream_options: null,
+    messages: {
+      total: 1,
+      omitted: 0,
+      last: {
+        role: 'user',
+        content_preview: 'hello',
+        content_length: 5,
+      },
+    },
+  });
+});
+
 test('OpenAIRestClient summarizes multi-turn request and long response logs', async () => {
   const longUserMessage = 'x'.repeat(300);
   const longReply = 'y'.repeat(320);

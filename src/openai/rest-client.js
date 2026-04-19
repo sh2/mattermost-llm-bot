@@ -167,10 +167,16 @@ export class OpenAIRestClient {
     const requestBody = {
       model: this.model,
       messages,
-      reasoning_effort: this.reasoningEffort,
-      verbosity: this.verbosity,
       stream,
     };
+
+    if (this.reasoningEffort !== null && this.reasoningEffort !== undefined) {
+      requestBody.reasoning_effort = this.reasoningEffort;
+    }
+
+    if (this.verbosity !== null && this.verbosity !== undefined) {
+      requestBody.verbosity = this.verbosity;
+    }
 
     if (stream) {
       requestBody.stream_options = {

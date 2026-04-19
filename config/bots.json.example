@@ -5,11 +5,8 @@
     },
     "llm": {
       "provider": "openai",
-      "compatibilityProfile": "openai",
       "baseUrl": "https://api.openai.com/v1",
-      "stream": true,
-      "reasoningEffort": "medium",
-      "verbosity": "medium"
+      "stream": true
     }
   },
   "bots": [
@@ -17,6 +14,14 @@
       "name": "support-ja",
       "llm": {
         "model": "gpt-5.4-mini"
+      }
+    },
+    {
+      "name": "review-en",
+      "llm": {
+        "model": "gpt-5.4",
+        "reasoningEffort": "high",
+        "verbosity": "medium"
       }
     }
   ]
