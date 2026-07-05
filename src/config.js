@@ -9,6 +9,7 @@ const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const FALSE_VALUES = new Set(['0', 'false', 'no', 'off']);
 const DEFAULT_CONFIG_PATH = './config/bots.json';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const DEFAULT_MAX_LONG_EDGE = 1536;
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -159,6 +160,33 @@ function getOptionalObject(value, name) {
   return value;
 }
 
+function mergeOptionalNestedObject(base, override) {
+  if (override === undefined) {
+    return base;
+  }
+
+  if (isPlainObject(base) && isPlainObject(override)) {
+    return {
+      ...base,
+      ...override,
+    };
+  }
+
+  return override;
+}
+
+function normalizeMaxLongEdge(value, name) {
+  if (value === undefined || value === null || value === '') {
+    return DEFAULT_MAX_LONG_EDGE;
+  }
+
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+
+  return value;
+}
+
 function getConfigRoot(configPath, readFileSyncImpl) {
   const parsed = readJsonFile(configPath, readFileSyncImpl);
 
@@ -184,16 +212,22 @@ function mergeBotDefinition(defaults, botDefinition, index) {
 
   const name = normalizeRequiredString(botDefinition.name, `bots[${index}].name`);
 
+  const defaultMattermost = getOptionalObject(defaults.mattermost, 'defaults.mattermost');
+  const botMattermost = getOptionalObject(botDefinition.mattermost, `bots[${index}].mattermost`);
+  const defaultLlm = getOptionalObject(defaults.llm, 'defaults.llm');
+  const botLlm = getOptionalObject(botDefinition.llm, `bots[${index}].llm`);
+
   return {
     index,
     name,
     mattermost: {
-      ...defaults.mattermost,
-      ...getOptionalObject(botDefinition.mattermost, `bots[${index}].mattermost`),
+      ...defaultMattermost,
+      ...botMattermost,
     },
     llm: {
-      ...defaults.llm,
-      ...getOptionalObject(botDefinition.llm, `bots[${index}].llm`),
+      ...defaultLlm,
+      ...botLlm,
+      images: mergeOptionalNestedObject(defaultLlm.images, botLlm.images),
     },
   };
 }
@@ -239,6 +273,12 @@ function buildRuntimeBotConfig(mergedBot, env) {
       model: normalizeRequiredString(mergedBot.llm.model, `${botLabel} llm.model`),
       stream: parseBooleanLike(mergedBot.llm.stream, `${botLabel} llm.stream`, true),
       apiUrl,
+      images: {
+        maxLongEdge: normalizeMaxLongEdge(
+          getOptionalObject(mergedBot.llm.images, `${botLabel} llm.images`).maxLongEdge,
+          `${botLabel} llm.images.maxLongEdge`,
+        ),
+      },
       reasoningEffort: normalizeOptionalString(
         mergedBot.llm.reasoningEffort,
         `${botLabel} llm.reasoningEffort`,

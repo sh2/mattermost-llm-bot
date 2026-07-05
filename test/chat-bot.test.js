@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildOpenAIRequestMessages,
   ChatBot,
+  collectThreadImages,
   shouldRespondToThread,
 } from '../src/bots/chat-bot.js';
 
@@ -471,4 +472,386 @@ test('buildOpenAIRequestMessages always includes the system prompt entry', () =>
       { role: 'user', content: 'hello' },
     ],
   );
+});
+
+test('buildOpenAIRequestMessages expands imagesByPostId into multimodal content', () => {
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        user_id: 'user-1',
+        message: '@support-ja see this',
+      },
+    },
+  };
+
+  assert.deepEqual(
+    buildOpenAIRequestMessages({
+      thread,
+      botUserId: 'bot-1',
+      botUsername: 'support-ja',
+      systemPrompt: 'Stay concise.',
+      imagesByPostId: {
+        root: [{ dataUrl: 'data:image/jpeg;base64,abc', mimeType: 'image/jpeg' }],
+      },
+    }),
+    [
+      { role: 'system', content: 'Stay concise.' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'see this' },
+          {
+            type: 'image_url',
+            image_url: { url: 'data:image/jpeg;base64,abc' },
+          },
+        ],
+      },
+    ],
+  );
+});
+
+test('buildOpenAIRequestMessages keeps multiple images in file order after the text part', () => {
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        user_id: 'user-1',
+        message: '@support-ja compare',
+      },
+    },
+  };
+
+  const messages = buildOpenAIRequestMessages({
+    thread,
+    botUserId: 'bot-1',
+    botUsername: 'support-ja',
+    systemPrompt: '',
+    imagesByPostId: {
+      root: [
+        { dataUrl: 'data:image/jpeg;base64,first', mimeType: 'image/jpeg' },
+        { dataUrl: 'data:image/jpeg;base64,second', mimeType: 'image/jpeg' },
+      ],
+    },
+  });
+
+  assert.deepEqual(messages[1], {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'compare' },
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,first' } },
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,second' } },
+    ],
+  });
+});
+
+test('collectThreadImages builds image parts with resized data URLs', async () => {
+  const calls = [];
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        user_id: 'user-1',
+        file_ids: ['img-1'],
+      },
+    },
+  };
+  const mattermost = {
+    async getFileInfosForPost(postId) {
+      calls.push(['getFileInfosForPost', postId]);
+      return [{ id: 'img-1', mime_type: 'image/png' }];
+    },
+    async getFileContent(fileId) {
+      calls.push(['getFileContent', fileId]);
+      return new Uint8Array([1, 2, 3]);
+    },
+  };
+  const resizer = async (bytes, maxLongEdge) => {
+    calls.push(['resizer', Array.from(bytes), maxLongEdge]);
+    return {
+      bytes: Buffer.from('resized-image'),
+      mimeType: 'image/jpeg',
+    };
+  };
+
+  const imagesByPostId = await collectThreadImages({
+    thread,
+    mattermost,
+    resizer,
+    maxLongEdge: 1024,
+    logger: { warn() {} },
+  });
+
+  assert.deepEqual(calls, [
+    ['getFileInfosForPost', 'root'],
+    ['getFileContent', 'img-1'],
+    ['resizer', [1, 2, 3], 1024],
+  ]);
+  assert.equal(imagesByPostId.root.length, 1);
+  assert.equal(imagesByPostId.root[0].mimeType, 'image/jpeg');
+  assert.equal(
+    imagesByPostId.root[0].dataUrl,
+    `data:image/jpeg;base64,${Buffer.from('resized-image').toString('base64')}`,
+  );
+});
+
+test('collectThreadImages preserves post file_ids order', async () => {
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        file_ids: ['b', 'a'],
+      },
+    },
+  };
+  const mattermost = {
+    async getFileInfosForPost() {
+      return [
+        { id: 'a', mime_type: 'image/png' },
+        { id: 'b', mime_type: 'image/png' },
+      ];
+    },
+    async getFileContent(fileId) {
+      return Buffer.from(fileId);
+    },
+  };
+  const resizer = async (bytes) => ({ bytes, mimeType: 'image/jpeg' });
+
+  const imagesByPostId = await collectThreadImages({
+    thread,
+    mattermost,
+    resizer,
+    maxLongEdge: 1536,
+    logger: { warn() {} },
+  });
+
+  assert.deepEqual(
+    imagesByPostId.root.map((part) => part.dataUrl),
+    [
+      `data:image/jpeg;base64,${Buffer.from('b').toString('base64')}`,
+      `data:image/jpeg;base64,${Buffer.from('a').toString('base64')}`,
+    ],
+  );
+});
+
+test('collectThreadImages ignores non-image attachments', async () => {
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        file_ids: ['doc-1'],
+      },
+    },
+  };
+  const mattermost = {
+    async getFileInfosForPost() {
+      return [{ id: 'doc-1', mime_type: 'application/pdf' }];
+    },
+    async getFileContent() {
+      throw new Error('should not download non-image file');
+    },
+  };
+
+  const imagesByPostId = await collectThreadImages({
+    thread,
+    mattermost,
+    resizer: async () => ({ bytes: Buffer.alloc(0), mimeType: 'image/jpeg' }),
+    maxLongEdge: 1536,
+    logger: { warn() {} },
+  });
+
+  assert.deepEqual(imagesByPostId, {});
+});
+
+test('collectThreadImages skips only the image that fails to download', async () => {
+  const warnings = [];
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        file_ids: ['bad', 'good'],
+      },
+    },
+  };
+  const mattermost = {
+    async getFileInfosForPost() {
+      return [
+        { id: 'bad', mime_type: 'image/png' },
+        { id: 'good', mime_type: 'image/png' },
+      ];
+    },
+    async getFileContent(fileId) {
+      if (fileId === 'bad') {
+        throw new Error('boom');
+      }
+
+      return Buffer.from('good');
+    },
+  };
+
+  const imagesByPostId = await collectThreadImages({
+    thread,
+    mattermost,
+    resizer: async (bytes) => ({ bytes, mimeType: 'image/jpeg' }),
+    maxLongEdge: 1536,
+    logger: {
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+  });
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Failed to process image file bad for post root/);
+  assert.deepEqual(
+    imagesByPostId.root.map((part) => part.dataUrl),
+    [`data:image/jpeg;base64,${Buffer.from('good').toString('base64')}`],
+  );
+});
+
+test('collectThreadImages skips posts whose file infos cannot be loaded', async () => {
+  const warnings = [];
+  const thread = {
+    order: ['root'],
+    posts: {
+      root: {
+        id: 'root',
+        file_ids: ['img-1'],
+      },
+    },
+  };
+
+  const imagesByPostId = await collectThreadImages({
+    thread,
+    mattermost: {
+      async getFileInfosForPost() {
+        throw new Error('failed');
+      },
+      async getFileContent() {
+        throw new Error('should not be called');
+      },
+    },
+    resizer: async () => ({ bytes: Buffer.alloc(0), mimeType: 'image/jpeg' }),
+    maxLongEdge: 1536,
+    logger: {
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+  });
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Failed to load file infos for post root/);
+  assert.deepEqual(imagesByPostId, {});
+});
+
+test('ChatBot uses the injected resizer and starts typing before loading thread images', async () => {
+  const callOrder = [];
+  const llmCalls = [];
+  const mattermost = {
+    async connect() {
+      return { id: 'bot-1', username: 'support-ja' };
+    },
+    onPost() {
+      return () => {};
+    },
+    close() {},
+    async getThread() {
+      return {
+        order: ['root'],
+        posts: {
+          root: {
+            id: 'root',
+            user_id: 'user-1',
+            channel_id: 'channel-1',
+            message: '@support-ja hello',
+            file_ids: ['img-1'],
+          },
+        },
+      };
+    },
+    async getChannel() {
+      return { header: 'Stay concise.' };
+    },
+    startTypingLoop() {
+      callOrder.push('startTypingLoop');
+      return { stop() {} };
+    },
+    async getFileInfosForPost() {
+      callOrder.push('getFileInfosForPost');
+      return [{ id: 'img-1', mime_type: 'image/png' }];
+    },
+    async getFileContent() {
+      callOrder.push('getFileContent');
+      return Buffer.from('source-image');
+    },
+    async createReply() {},
+  };
+  const llm = {
+    async createChatCompletion(messages) {
+      llmCalls.push(messages);
+      return 'reply';
+    },
+  };
+  const fakeResizer = async (bytes, maxLongEdge) => {
+    callOrder.push(['resizer', maxLongEdge, bytes.toString()]);
+    return {
+      bytes: Buffer.from('resized-image'),
+      mimeType: 'image/jpeg',
+    };
+  };
+  const bot = new ChatBot({
+    mattermost,
+    llm,
+    config: {
+      llm: {
+        stream: false,
+        images: {
+          maxLongEdge: 768,
+        },
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+    resizer: fakeResizer,
+  });
+
+  await bot.start();
+  await bot.processPost({
+    post: {
+      id: 'root',
+      user_id: 'user-1',
+      channel_id: 'channel-1',
+      message: '@support-ja hello',
+    },
+    senderName: 'Human',
+  });
+
+  assert.equal(callOrder[0], 'startTypingLoop');
+  assert.deepEqual(callOrder.slice(1), [
+    'getFileInfosForPost',
+    'getFileContent',
+    ['resizer', 768, 'source-image'],
+  ]);
+  assert.equal(llmCalls.length, 1);
+  assert.deepEqual(llmCalls[0], [
+    { role: 'system', content: 'Stay concise.' },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'hello' },
+        {
+          type: 'image_url',
+          image_url: {
+            url: `data:image/jpeg;base64,${Buffer.from('resized-image').toString('base64')}`,
+          },
+        },
+      ],
+    },
+  ]);
 });

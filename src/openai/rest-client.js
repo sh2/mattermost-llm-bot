@@ -12,6 +12,15 @@ function truncateForLog(value, maxLength = LOG_PREVIEW_LIMIT) {
   return `${value.slice(0, maxLength)}...`;
 }
 
+function countImageParts(content) {
+  if (!Array.isArray(content)) {
+    return 0;
+  }
+
+  return content.filter((part) => part && typeof part === 'object' && part.type === 'image_url')
+    .length;
+}
+
 function summarizeMessageForLog(message) {
   if (!message || typeof message !== 'object') {
     return null;
@@ -23,16 +32,22 @@ function summarizeMessageForLog(message) {
     role: typeof message.role === 'string' ? message.role : 'unknown',
     content_preview: truncateForLog(content),
     content_length: content.length,
+    image_part_count: countImageParts(message.content),
   };
 }
 
 function summarizeMessagesForLog(messages) {
   const safeMessages = Array.isArray(messages) ? messages : [];
   const lastMessage = safeMessages.at(-1);
+  const imagePartCount = safeMessages.reduce(
+    (sum, message) => sum + countImageParts(message?.content),
+    0,
+  );
 
   return {
     total: safeMessages.length,
     omitted: safeMessages.length > 1 ? safeMessages.length - 1 : 0,
+    image_part_count: imagePartCount,
     last: summarizeMessageForLog(lastMessage),
   };
 }

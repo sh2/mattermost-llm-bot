@@ -79,6 +79,9 @@ test('loadConfig parses JSON config, merges defaults, and resolves bot secrets',
       model: 'gpt-5.1-mini',
       stream: true,
       apiUrl: 'https://api.openai.com/v1/chat/completions',
+      images: {
+        maxLongEdge: 1536,
+      },
       reasoningEffort: null,
       verbosity: null,
       streamUpdateIntervalMs: 1000,
@@ -97,6 +100,9 @@ test('loadConfig parses JSON config, merges defaults, and resolves bot secrets',
       model: 'gpt-5.1',
       stream: false,
       apiUrl: 'https://example.com/custom/v1/chat/completions',
+      images: {
+        maxLongEdge: 1536,
+      },
       reasoningEffort: 'high',
       verbosity: 'low',
       streamUpdateIntervalMs: 1000,
@@ -242,3 +248,114 @@ test('loadConfig rejects llm.baseUrl values that already include chat completion
     /must be a base URL and must not include \/chat\/completions/,
   );
 });
+
+test('loadConfig parses llm.images.maxLongEdge', (t) => {
+  const { dir } = createTempConfig(t, {
+    defaults: {
+      mattermost: { url: 'http://localhost:8065' },
+      llm: { model: 'gpt-test' },
+    },
+    bots: [
+      {
+        name: 'support-ja',
+        llm: {
+          images: {
+            maxLongEdge: 1024,
+          },
+        },
+      },
+    ],
+  });
+
+  const config = loadConfig(
+    {
+      BOT_CONFIG_PATH: './bots.json',
+      BOT_SUPPORT_JA_TOKEN: 'token',
+      BOT_SUPPORT_JA_LLM_API_KEY: 'key',
+    },
+    { cwd: dir },
+  );
+
+  assert.equal(config.bots[0].llm.images.maxLongEdge, 1024);
+});
+
+test('loadConfig defaults llm.images.maxLongEdge to 1536', (t) => {
+  const { dir } = createTempConfig(t, {
+    defaults: {
+      mattermost: { url: 'http://localhost:8065' },
+      llm: { model: 'gpt-test' },
+    },
+    bots: [{ name: 'support-ja' }],
+  });
+
+  const config = loadConfig(
+    {
+      BOT_CONFIG_PATH: './bots.json',
+      BOT_SUPPORT_JA_TOKEN: 'token',
+      BOT_SUPPORT_JA_LLM_API_KEY: 'key',
+    },
+    { cwd: dir },
+  );
+
+  assert.equal(config.bots[0].llm.images.maxLongEdge, 1536);
+});
+
+for (const invalidValue of [0, -1, 'abc', 1536.5]) {
+  test(`loadConfig rejects invalid llm.images.maxLongEdge: ${String(invalidValue)}`, (t) => {
+    const { configPath } = createTempConfig(t, {
+      defaults: {
+        mattermost: { url: 'http://localhost:8065' },
+        llm: { model: 'gpt-test' },
+      },
+      bots: [
+        {
+          name: 'support-ja',
+          llm: {
+            images: {
+              maxLongEdge: invalidValue,
+            },
+          },
+        },
+      ],
+    });
+
+    assert.throws(
+      () =>
+        loadConfig({
+          BOT_CONFIG_PATH: configPath,
+          BOT_SUPPORT_JA_TOKEN: 'token',
+          BOT_SUPPORT_JA_LLM_API_KEY: 'key',
+        }),
+      /llm\.images\.maxLongEdge must be a positive integer/,
+    );
+  });
+}
+
+for (const invalidImagesValue of [true, [], 'fast']) {
+  test(`loadConfig rejects non-object llm.images: ${JSON.stringify(invalidImagesValue)}`, (t) => {
+    const { configPath } = createTempConfig(t, {
+      defaults: {
+        mattermost: { url: 'http://localhost:8065' },
+        llm: { model: 'gpt-test' },
+      },
+      bots: [
+        {
+          name: 'support-ja',
+          llm: {
+            images: invalidImagesValue,
+          },
+        },
+      ],
+    });
+
+    assert.throws(
+      () =>
+        loadConfig({
+          BOT_CONFIG_PATH: configPath,
+          BOT_SUPPORT_JA_TOKEN: 'token',
+          BOT_SUPPORT_JA_LLM_API_KEY: 'key',
+        }),
+      /Bot "support-ja" llm\.images must be an object/,
+    );
+  });
+}

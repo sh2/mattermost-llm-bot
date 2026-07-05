@@ -19,11 +19,12 @@ export function parsePostedEvent(message) {
 }
 
 export class MattermostService {
-  constructor(config, logger = console) {
+  constructor(config, logger = console, fetchImpl = globalThis.fetch) {
     this.url = config.url;
     this.token = config.token;
     this.typingIntervalMs = config.typingIntervalMs;
     this.logger = logger;
+    this.fetchImpl = fetchImpl;
     this.postListeners = new Set();
     this.handleMessage = this.handleMessage.bind(this);
   }
@@ -91,6 +92,28 @@ export class MattermostService {
   async getChannel(channelId) {
     this.ensureClient();
     return this.client.getChannel(channelId);
+  }
+
+  async getFileInfosForPost(postId) {
+    this.ensureClient();
+    return this.client.getFileInfosForPost(postId);
+  }
+
+  async getFileContent(fileId) {
+    this.ensureClient();
+
+    const fileUrl = this.client.getFileUrl(fileId, Date.now());
+    const response = await this.fetchImpl(fileUrl, {
+      headers: {
+        authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Mattermost file download failed with status ${response.status}: ${fileId}`);
+    }
+
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   async createReply({ channelId, rootId, message }) {

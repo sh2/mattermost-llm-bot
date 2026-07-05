@@ -1,3 +1,5 @@
+import { resizeImageToMaxLongEdge } from '../images/resizer.js';
+
 const STREAM_CURSOR = '▌';
 
 function escapeRegExp(value) {
@@ -27,6 +29,10 @@ function sanitizeUserMessage(message, botUsername) {
 
 function stripStreamingCursor(message) {
   return message.endsWith(STREAM_CURSOR) ? message.slice(0, -1) : message;
+}
+
+function isImageMimeType(mimeType) {
+  return typeof mimeType === 'string' && mimeType.startsWith('image/');
 }
 
 function getThreadPostsInConversationOrder(thread) {
@@ -99,7 +105,68 @@ export function shouldRespondToThread(thread, botUsername) {
   );
 }
 
-export function buildOpenAIRequestMessages({ thread, botUserId, botUsername, systemPrompt }) {
+export async function collectThreadImages({
+  thread,
+  mattermost,
+  resizer,
+  maxLongEdge,
+  logger = console,
+}) {
+  const imagesByPostId = {};
+
+  for (const post of getThreadPostsInConversationOrder(thread)) {
+    const fileIds = Array.isArray(post.file_ids) ? post.file_ids : [];
+
+    if (fileIds.length === 0) {
+      continue;
+    }
+
+    let fileInfos;
+
+    try {
+      fileInfos = await mattermost.getFileInfosForPost(post.id);
+    } catch (error) {
+      logger.warn(`Failed to load file infos for post ${post.id}.`, error);
+      continue;
+    }
+
+    const fileInfoById = new Map(
+      (Array.isArray(fileInfos) ? fileInfos : []).map((info) => [info.id, info]),
+    );
+    const orderedFileInfos = fileIds.map((fileId) => fileInfoById.get(fileId)).filter(Boolean);
+    const imageParts = [];
+
+    for (const fileInfo of orderedFileInfos) {
+      if (!isImageMimeType(fileInfo.mime_type)) {
+        continue;
+      }
+
+      try {
+        const bytes = await mattermost.getFileContent(fileInfo.id);
+        const { bytes: resizedBytes, mimeType } = await resizer(bytes, maxLongEdge);
+        const dataUrl = `data:${mimeType};base64,${Buffer.from(resizedBytes).toString('base64')}`;
+
+        imageParts.push({ dataUrl, mimeType });
+      } catch (error) {
+        logger.warn(`Failed to process image file ${fileInfo.id} for post ${post.id}.`, error);
+      }
+    }
+
+    if (imageParts.length > 0) {
+      imagesByPostId[post.id] = imageParts;
+    }
+  }
+
+  return imagesByPostId;
+}
+
+export function buildOpenAIRequestMessages({
+  thread,
+  botUserId,
+  botUsername,
+  systemPrompt,
+  imagesByPostId = {},
+}) {
   const messages = [
     {
       role: 'system',
@@ -108,17 +175,32 @@ export function buildOpenAIRequestMessages({ thread, botUserId, botUsername, sys
   ];
 
   for (const post of getThreadPostsInConversationOrder(thread)) {
-    if (post.user_id === botUserId) {
-      messages.push({
-        role: 'assistant',
-        content: stripStreamingCursor(post.message ?? ''),
-      });
+    const role = post.user_id === botUserId ? 'assistant' : 'user';
+    const textContent =
+      role === 'assistant'
+        ? stripStreamingCursor(post.message ?? '')
+        : sanitizeUserMessage(post.message ?? '', botUsername);
+    const imageParts = imagesByPostId[post.id] ?? [];
+
+    if (imageParts.length === 0) {
+      messages.push({ role, content: textContent });
       continue;
     }
 
     messages.push({
-      role: 'user',
-      content: sanitizeUserMessage(post.message ?? '', botUsername),
+      role,
+      content: [
+        {
+          type: 'text',
+          text: textContent,
+        },
+        ...imageParts.map((part) => ({
+          type: 'image_url',
+          image_url: {
+            url: part.dataUrl,
+          },
+        })),
+      ],
     });
   }
 
@@ -126,11 +208,12 @@ export function buildOpenAIRequestMessages({ thread, botUserId, botUsername, sys
 }
 
 export class ChatBot {
-  constructor({ mattermost, llm, config, logger = console }) {
+  constructor({ mattermost, llm, config, logger = console, resizer = resizeImageToMaxLongEdge }) {
     this.mattermost = mattermost;
     this.llm = llm;
     this.config = config;
     this.logger = logger;
+    this.resizer = resizer;
     this.processingPostIds = new Set();
   }
 
@@ -187,15 +270,24 @@ export class ChatBot {
       }
 
       const channel = await this.mattermost.getChannel(post.channel_id);
-      const messages = buildOpenAIRequestMessages({
-        thread,
-        botUserId: this.botUser.id,
-        botUsername: this.botUser.username,
-        systemPrompt: channel.header ?? '',
-      });
       const typing = this.mattermost.startTypingLoop(post.channel_id, post.root_id || '');
 
       try {
+        const imagesByPostId = await collectThreadImages({
+          thread,
+          mattermost: this.mattermost,
+          resizer: this.resizer,
+          maxLongEdge: this.config.llm.images?.maxLongEdge,
+          logger: this.logger,
+        });
+        const messages = buildOpenAIRequestMessages({
+          thread,
+          botUserId: this.botUser.id,
+          botUsername: this.botUser.username,
+          systemPrompt: channel.header ?? '',
+          imagesByPostId,
+        });
+
         if (llmConfig.stream) {
           const { replyId, replyMessage } = await streamReply({
             llm: this.llm,

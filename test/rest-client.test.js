@@ -113,10 +113,12 @@ test('OpenAIRestClient sends non-streaming requests with auth headers', async ()
     messages: {
       total: 1,
       omitted: 0,
+      image_part_count: 0,
       last: {
         role: 'user',
         content_preview: 'hello',
         content_length: 5,
+        image_part_count: 0,
       },
     },
   });
@@ -134,6 +136,7 @@ test('OpenAIRestClient sends non-streaming requests with auth headers', async ()
       role: 'assistant',
       content_preview: 'non-stream reply',
       content_length: 16,
+      image_part_count: 0,
     },
   });
 });
@@ -193,10 +196,12 @@ test('OpenAIRestClient omits optional GPT-5 fields when they are unset', async (
     messages: {
       total: 1,
       omitted: 0,
+      image_part_count: 0,
       last: {
         role: 'user',
         content_preview: 'hello',
         content_length: 5,
+        image_part_count: 0,
       },
     },
   });
@@ -339,10 +344,12 @@ test('OpenAIRestClient accumulates streamed deltas', async () => {
     messages: {
       total: 1,
       omitted: 0,
+      image_part_count: 0,
       last: {
         role: 'user',
         content_preview: 'hello',
         content_length: 5,
+        image_part_count: 0,
       },
     },
   });
@@ -361,6 +368,160 @@ test('OpenAIRestClient accumulates streamed deltas', async () => {
       role: 'assistant',
       content_preview: 'Hello world',
       content_length: 11,
+      image_part_count: 0,
     },
   });
+});
+
+test('OpenAIRestClient logs image part counts for multimodal requests', async () => {
+  const logEntries = [];
+  const client = new OpenAIRestClient(
+    {
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      reasoningEffort: null,
+      verbosity: null,
+    },
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'reply',
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    {
+      info(message) {
+        logEntries.push(message);
+      },
+    },
+  );
+
+  await client.createChatCompletion([
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'hello' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,one' } },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,two' } },
+      ],
+    },
+  ]);
+
+  const requestSummary = parseLogSummary(logEntries[0], 'OpenAI request summary');
+  assert.equal(requestSummary.messages.image_part_count, 2);
+  assert.equal(requestSummary.messages.last.image_part_count, 2);
+});
+
+test('OpenAIRestClient aggregates image counts across all request messages', async () => {
+  const logEntries = [];
+  const client = new OpenAIRestClient(
+    {
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      reasoningEffort: null,
+      verbosity: null,
+    },
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'reply',
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    {
+      info(message) {
+        logEntries.push(message);
+      },
+    },
+  );
+
+  await client.createChatCompletion([
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'first' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,one' } },
+      ],
+    },
+    {
+      role: 'user',
+      content: 'text only',
+    },
+  ]);
+
+  const requestSummary = parseLogSummary(logEntries[0], 'OpenAI request summary');
+  assert.equal(requestSummary.messages.image_part_count, 1);
+  assert.equal(requestSummary.messages.last.image_part_count, 0);
+});
+
+test('OpenAIRestClient does not include image base64 data in content previews', async () => {
+  const logEntries = [];
+  const base64Payload = 'A'.repeat(500);
+  const client = new OpenAIRestClient(
+    {
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      reasoningEffort: null,
+      verbosity: null,
+    },
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: 'reply',
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    {
+      info(message) {
+        logEntries.push(message);
+      },
+    },
+  );
+
+  await client.createChatCompletion([
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'hello' },
+        {
+          type: 'image_url',
+          image_url: { url: `data:image/jpeg;base64,${base64Payload}` },
+        },
+      ],
+    },
+  ]);
+
+  const requestSummary = parseLogSummary(logEntries[0], 'OpenAI request summary');
+  assert.equal(requestSummary.messages.last.content_preview, 'hello');
+  assert.equal(requestSummary.messages.last.content_preview.includes(base64Payload), false);
 });
