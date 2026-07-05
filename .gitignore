@@ -1,4 +1,5 @@
-config/bots.json
-node_modules/
 .env*
 !.env.example
+config/bots.json*
+!config/bots.json.example
+node_modules/
