@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildOpenAIRequestMessages, ChatBot, shouldRespondToThread } from '../src/bots/chat-bot.js';
+import {
+  buildOpenAIRequestMessages,
+  ChatBot,
+  shouldRespondToThread,
+} from '../src/bots/chat-bot.js';
 
 test('shouldRespondToThread returns true when any post mentions the bot', () => {
   const thread = {
@@ -78,7 +82,7 @@ test('ChatBot ignores its own posts even when sender name does not match ai-*', 
     close() {},
     async getThread() {
       calls.push('getThread');
-      throw new Error('should not load thread for the bot\'s own post');
+      throw new Error("should not load thread for the bot's own post");
     },
   };
   const bot = new ChatBot({
@@ -126,16 +130,17 @@ test('ChatBot loads the thread using the root post id for replies', async () => 
 
   await bot.start();
   await assert.rejects(
-    () => bot.processPost({
-      post: {
-        id: 'reply-4',
-        root_id: 'root-1',
-        user_id: 'user-1',
-        channel_id: 'channel-1',
-        message: 'follow-up',
-      },
-      senderName: 'SH2',
-    }),
+    () =>
+      bot.processPost({
+        post: {
+          id: 'reply-4',
+          root_id: 'root-1',
+          user_id: 'user-1',
+          channel_id: 'channel-1',
+          message: 'follow-up',
+        },
+        senderName: 'SH2',
+      }),
     /stop after capturing thread id/,
   );
 

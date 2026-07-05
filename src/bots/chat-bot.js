@@ -19,7 +19,10 @@ function buildMentionPattern(botUsername) {
 function sanitizeUserMessage(message, botUsername) {
   const mentionPattern = new RegExp(`(^|\\s)@${escapeRegExp(botUsername)}(?=$|\\s)`, 'g');
 
-  return message.replace(mentionPattern, ' ').replace(/\s{2,}/g, ' ').trim();
+  return message
+    .replace(mentionPattern, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function stripStreamingCursor(message) {
@@ -96,19 +99,15 @@ export function shouldRespondToThread(thread, botUsername) {
   );
 }
 
-export function buildOpenAIRequestMessages({
-  thread,
-  botUserId,
-  botUsername,
-  systemPrompt,
-}) {
-  const messages = [{
-    role: 'system',
-    content: systemPrompt,
-  }];
+export function buildOpenAIRequestMessages({ thread, botUserId, botUsername, systemPrompt }) {
+  const messages = [
+    {
+      role: 'system',
+      content: systemPrompt,
+    },
+  ];
 
   for (const post of getThreadPostsInConversationOrder(thread)) {
-
     if (post.user_id === botUserId) {
       messages.push({
         role: 'assistant',
@@ -164,10 +163,10 @@ export class ChatBot {
     }
 
     if (
-      !post
-      || post.user_id === this.botUser.id
-      || normalizedSenderName.startsWith('ai-')
-      || post.type
+      !post ||
+      post.user_id === this.botUser.id ||
+      normalizedSenderName.startsWith('ai-') ||
+      post.type
     ) {
       return;
     }

@@ -76,10 +76,7 @@ export async function startBotBundles(bundles, logger = console) {
       try {
         await bundle.bot.stop();
       } catch (stopError) {
-        logger.error(
-          `[${bundle.name}] Failed to stop bot during startup rollback.`,
-          stopError,
-        );
+        logger.error(`[${bundle.name}] Failed to stop bot during startup rollback.`, stopError);
       }
 
       await stopBotBundles(startedBundles, logger);
@@ -175,8 +172,8 @@ export async function main() {
   await startRuntime();
 }
 
-const isMainModule = process.argv[1]
-  && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url);
+const isMainModule =
+  process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
   main().catch((error) => {

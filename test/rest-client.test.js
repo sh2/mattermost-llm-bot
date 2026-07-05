@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  OpenAIRestClient,
   extractAssistantMessage,
   iterateServerSentEvents,
+  OpenAIRestClient,
 } from '../src/openai/rest-client.js';
 
 function parseLogSummary(logEntry, prefix) {

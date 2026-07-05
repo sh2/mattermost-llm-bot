@@ -138,10 +138,7 @@ test('loadConfig rejects duplicate bot names', (t) => {
       mattermost: { url: 'http://localhost:8065' },
       llm: { model: 'gpt-default' },
     },
-    bots: [
-      { name: 'support-ja' },
-      { name: 'support-ja' },
-    ],
+    bots: [{ name: 'support-ja' }, { name: 'support-ja' }],
   });
 
   assert.throws(
@@ -160,9 +157,7 @@ test('loadConfig reports missing merged values with bot context', (t) => {
     defaults: {
       mattermost: { url: 'http://localhost:8065' },
     },
-    bots: [
-      { name: 'support-ja' },
-    ],
+    bots: [{ name: 'support-ja' }],
   });
 
   assert.throws(
@@ -182,9 +177,7 @@ test('loadConfig reports missing bot-scoped secrets with bot context', (t) => {
       mattermost: { url: 'http://localhost:8065' },
       llm: { model: 'gpt-test' },
     },
-    bots: [
-      { name: 'support-ja' },
-    ],
+    bots: [{ name: 'support-ja' }],
   });
 
   assert.throws(

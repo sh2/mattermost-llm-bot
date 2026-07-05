@@ -71,7 +71,7 @@ export class MattermostService {
       Promise.resolve()
         .then(() => listener(event))
         .catch((error) => {
-        this.logger.error('Unhandled Mattermost post listener error.', error);
+          this.logger.error('Unhandled Mattermost post listener error.', error);
         });
     }
   }

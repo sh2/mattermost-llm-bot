@@ -68,10 +68,7 @@ function createFakeProcessRef() {
 test('startBotBundles starts all bots and logs the started bot list', async () => {
   const calls = [];
   const logger = createArrayLogger();
-  const bundles = [
-    createFakeBundle('support-ja', calls),
-    createFakeBundle('review-en', calls),
-  ];
+  const bundles = [createFakeBundle('support-ja', calls), createFakeBundle('review-en', calls)];
 
   await startBotBundles(bundles, logger);
 

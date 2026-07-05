@@ -119,9 +119,7 @@ function normalizeOpenAIBaseUrl(value, name) {
   const normalizedPath = url.pathname.replace(/\/+$/, '');
 
   if (normalizedPath.endsWith('/chat/completions')) {
-    throw new Error(
-      `${name} must be a base URL and must not include /chat/completions.`,
-    );
+    throw new Error(`${name} must be a base URL and must not include /chat/completions.`);
   }
 
   url.pathname = `${normalizedPath}/chat/completions`;
@@ -206,7 +204,11 @@ function buildRuntimeBotConfig(mergedBot, env) {
     normalizeRequiredString(mergedBot.mattermost.url, `${botLabel} mattermost.url`),
     `${botLabel} mattermost.url`,
   );
-  const provider = normalizeOptionalString(mergedBot.llm.provider, `${botLabel} llm.provider`, 'openai');
+  const provider = normalizeOptionalString(
+    mergedBot.llm.provider,
+    `${botLabel} llm.provider`,
+    'openai',
+  );
 
   if (provider !== 'openai') {
     throw new Error(
@@ -215,7 +217,11 @@ function buildRuntimeBotConfig(mergedBot, env) {
   }
 
   const apiUrl = normalizeOpenAIBaseUrl(
-    normalizeOptionalString(mergedBot.llm.baseUrl, `${botLabel} llm.baseUrl`, DEFAULT_OPENAI_BASE_URL),
+    normalizeOptionalString(
+      mergedBot.llm.baseUrl,
+      `${botLabel} llm.baseUrl`,
+      DEFAULT_OPENAI_BASE_URL,
+    ),
     `${botLabel} llm.baseUrl`,
   );
   const envSuffix = normalizeBotEnvName(mergedBot.name);
@@ -255,10 +261,7 @@ export function normalizeBotEnvName(name) {
 }
 
 export function loadConfig(env = process.env, options = {}) {
-  const {
-    cwd = process.cwd(),
-    readFileSyncImpl = readFileSync,
-  } = options;
+  const { cwd = process.cwd(), readFileSyncImpl = readFileSync } = options;
   const configPath = resolvePath(
     cwd,
     readEnvStringWithDefault(env, 'BOT_CONFIG_PATH', DEFAULT_CONFIG_PATH),
@@ -286,7 +289,6 @@ export function loadConfig(env = process.env, options = {}) {
   const seenEnvNames = new Map();
 
   for (const mergedBot of mergedBots) {
-
     if (seenNames.has(mergedBot.name)) {
       throw new Error(`Bot name "${mergedBot.name}" is duplicated.`);
     }
