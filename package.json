@@ -5,7 +5,9 @@
   "main": "src/index.js",
   "scripts": {
     "test": "node --test",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "lint": "biome check",
+    "format": "biome format --write"
   },
   "keywords": [],
   "author": "",
@@ -16,8 +18,14 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@mattermost/client": "^11.5.0",
-    "dotenv": "^17.4.0",
-    "ws": "^8.20.0"
+    "@mattermost/client": "^11.8.0",
+    "dotenv": "^17.4.2",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2"
+  },
+  "allowScripts": {
+    "@biomejs/biome@2.5.2": true
   }
 }
