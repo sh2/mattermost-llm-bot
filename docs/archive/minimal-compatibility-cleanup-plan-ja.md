@@ -1,4 +1,4 @@
-## Plan: compatibilityProfile削除の最小改修
+# Plan: compatibilityProfile削除の最小改修
 
 Status: proposed. 既存の Markdown は変更せず、この文書を新規追加して最小改修の方針を整理する。
 
